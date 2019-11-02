@@ -5,6 +5,7 @@ categories = ["embedded", "no-std"]
 keywords = ["cortex-m", "driver", "stepper", "motor", "embedded-hal"]
 repository = "https://github.com/dethoter/stepper-driver"
 readme = "README.md"
+edition = "2018"
 
 license = "MIT OR Apache-2.0"
 authors = ["Evgen Druzhynin <evgen.druzhynin@gmail.com>"]
