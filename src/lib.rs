@@ -58,7 +58,7 @@
 
 #![deny(missing_debug_implementations)]
 #![deny(missing_docs)]
-#![deny(warnings)]
+//#![deny(warnings)]
 #![deny(trivial_casts)]
 #![deny(trivial_numeric_casts)]
 #![deny(unsafe_code)]
@@ -66,10 +66,12 @@
 #![deny(unused_import_braces)]
 #![deny(unused_qualifications)]
 
+#![allow(deprecated)]
+
 extern crate embedded_hal as hal;
 
 use core::marker::PhantomData;
-use hal::digital::OutputPin;
+use hal::digital::v2::OutputPin;
 use hal::blocking::delay::DelayUs;
 
 // TODO: support EN pin
@@ -83,11 +85,11 @@ static STEP_DIVISION: [u8; 8] = [1,2,4,8,16,32,64,128];
 
 /// A stepper motor driver generic struct
 #[derive(Debug)]
-pub struct MotorDriver<D, DIR, STEP, CHIP>
+pub struct MotorDriver<D, DIR, STEP, CHIP, PINERR>
 where
     D: DelayUs<u32>,
-    DIR: OutputPin,
-    STEP: OutputPin,
+    DIR: OutputPin<Error = PINERR>,
+    STEP: OutputPin<Error = PINERR>,
     CHIP: Params,
 {
     delay: D,
@@ -107,11 +109,11 @@ where
     step_interval: u32,
 }
 
-impl<D, DIR, STEP, CHIP> MotorDriver<D, DIR, STEP, CHIP>
+impl<D, DIR, STEP, CHIP, PINERR> MotorDriver<D, DIR, STEP, CHIP, PINERR>
 where
     D: DelayUs<u32>,
-    DIR: OutputPin,
-    STEP: OutputPin,
+    DIR: OutputPin<Error = PINERR>,
+    STEP: OutputPin<Error = PINERR>,
     CHIP: Params,
 {
     /// Sets the speed in revolutions per minute (1-200 is a reasonable range)
@@ -121,9 +123,14 @@ where
     }
 
     /// Moves the motor steps_to_move steps
-    pub fn move_instant(&mut self, steps_to_move: u64) {
+    pub fn move_instant(&mut self, steps_to_move: u64) -> Result<(), PINERR> {
         let steps_to_move = steps_to_move * self.step_division as u64;
-        (0..steps_to_move).for_each(|_| self.step(None));
+
+        for _ in 0..steps_to_move {
+            self.step(None)?;
+        }
+
+        Ok(())
     }
 
     /// Moves the motor smoothly `steps_to_move` steps.
@@ -131,22 +138,32 @@ where
     pub fn move_smooth(&mut self,
                        steps_to_move: u64,
                        steps_acc: u64,
-                       steps_dec: u64) {
+                       steps_dec: u64) -> Result<(), PINERR> {
         let steps_to_move = (steps_to_move - steps_acc - steps_dec) * self.step_division as u64;
         let steps_acc = steps_acc * self.step_division as u64;
         let steps_dec = steps_dec * self.step_division as u64;
 
-        (1..=steps_acc).for_each(|i| self.step(Some((i, steps_acc))));
-        (0..steps_to_move).for_each(|_| self.step(None));
-        (1..=steps_dec).rev().for_each(|i| self.step(Some((i, steps_dec))));
+        for i in 1..=steps_acc {
+            self.step(Some((i, steps_acc)))?;
+        }
+
+        for _ in 0..steps_to_move {
+            self.step(None)?;
+        }
+
+        for i in 1..=steps_dec {
+            self.step(Some((i, steps_dec)))?;
+        }
+
+        Ok(())
     }
 
     /// Set the direction
-    pub fn set_direction(&mut self, clock_work: bool) {
+    pub fn set_direction(&mut self, clock_work: bool) -> Result<(), PINERR> {
         if clock_work {
-            self.dir_pin.set_low();
+            self.dir_pin.set_low()
         } else {
-            self.dir_pin.set_high();
+            self.dir_pin.set_high()
         }
     }
 
@@ -155,8 +172,8 @@ where
     /// !!!FIXME!!!
     /// Super naive implementation due to limitaions of the `embedded-hal` crate.
     /// One should use a timer instead of delay when `timer` and `time` API stabilize.
-    fn step(&mut self, s: Option<(u64, u64)>) {
-        self.step_pin.set_high();
+    fn step(&mut self, s: Option<(u64, u64)>) -> Result<(), PINERR> {
+        self.step_pin.set_high()?;
 
         let mut step_interval = self.step_interval;
         if let Some((s1, s2)) = s {
@@ -167,7 +184,7 @@ where
 
         // Wait at least step_min_time
         self.delay.delay_us(CHIP::STEP_MIN_TIME);
-        self.step_pin.set_low();
+        self.step_pin.set_low()?;
 
         // Wait the rest of step_interval but at least step_min_time
         let rest = if step_interval > CHIP::STEP_MIN_TIME {
@@ -176,6 +193,8 @@ where
             CHIP::STEP_MIN_TIME
         };
         self.delay.delay_us(rest);
+
+        Ok(())
     }
 
     /// Generic version of constructor
@@ -184,11 +203,11 @@ where
            mut step_pin: STEP,
            number_of_steps: u16,
            step_division: u8,
-           rpm: f32) -> Self {
-        dir_pin.set_high();
-        step_pin.set_low();
+           rpm: f32) -> Result<Self, PINERR> {
+        dir_pin.set_high()?;
+        step_pin.set_low()?;
 
-        MotorDriver {
+        Ok(MotorDriver {
             delay,
             dir_pin,
             step_pin,
@@ -197,7 +216,7 @@ where
             step_division,
             step_interval: (60000000f32 / number_of_steps as f32
                 / rpm / step_division as f32) as u32,
-        }
+        })
     }
 }
 
@@ -218,11 +237,11 @@ macro_rules! driver {
             const STEP_MIN_TIME: u32 = $time;
         }
 
-        impl<D, DIR, STEP> MotorDriver<D, DIR, STEP, $name>
+        impl<D, DIR, STEP, PINERR> MotorDriver<D, DIR, STEP, $name, PINERR>
         where
             D: DelayUs<u32>,
-            DIR: OutputPin,
-            STEP: OutputPin
+            DIR: OutputPin<Error = PINERR>,
+            STEP: OutputPin<Error = PINERR>
         {
             /// Specialized constructor
             pub fn $name(delay: D,
@@ -230,7 +249,7 @@ macro_rules! driver {
                          step_pin: STEP,
                          number_of_steps: u16,
                          mut step_division: u8,
-                         rpm: f32) -> Self {
+                         rpm: f32) -> Result<Self, PINERR> {
                 if !STEP_DIVISION.contains(&step_division) {
                     step_division = 1;
                 }
