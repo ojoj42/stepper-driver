@@ -231,7 +231,8 @@ macro_rules! driver {
     ($name:ident, $time:expr) => {
         #[allow(non_camel_case_types)]
         #[derive(Debug)]
-        struct $name;
+        /// Motor variant
+        pub struct $name;
 
         impl Params for $name {
             const STEP_MIN_TIME: u32 = $time;
