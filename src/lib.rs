@@ -85,14 +85,16 @@ static STEP_DIVISION: [u8; 8] = [1,2,4,8,16,32,64,128];
 
 /// A stepper motor driver generic struct
 #[derive(Debug)]
-pub struct MotorDriver<DIR, STEP, CHIP, PINERR>
+pub struct MotorDriver<DIR, STEP, ENABLE, CHIP, PINERR>
 where
     DIR: OutputPin<Error = PINERR>,
     STEP: OutputPin<Error = PINERR>,
+    ENABLE: OutputPin<Error = PINERR>,
     CHIP: Params,
 {
     dir_pin: DIR,
     step_pin: STEP,
+    enable_pin: ENABLE,
 //    TODO: support EN pin
 //    enable_pin: OutputPin,
 //    TODO: support driver specific stepping mode
@@ -107,10 +109,11 @@ where
     step_interval: u32,
 }
 
-impl<DIR, STEP, CHIP, PINERR> MotorDriver<DIR, STEP, CHIP, PINERR>
+impl<DIR, STEP, ENABLE, CHIP, PINERR> MotorDriver<DIR, STEP, ENABLE, CHIP, PINERR>
 where
     DIR: OutputPin<Error = PINERR>,
     STEP: OutputPin<Error = PINERR>,
+    ENABLE: OutputPin<Error = PINERR>,
     CHIP: Params,
 {
     /// Sets the speed in revolutions per minute (1-200 is a reasonable range)
@@ -165,6 +168,15 @@ where
         }
     }
 
+    /// Enable driver
+    pub fn set_enable(&mut self, enable: bool) -> Result<(), PINERR> {
+        if enable {
+            self.enable_pin.set_low()
+        } else {
+            self.enable_pin.set_high()
+        }
+    }
+
     /// Toggle step and yield to step control.
     ///
     /// !!!FIXME!!!
@@ -198,15 +210,18 @@ where
     /// Generic version of constructor
     fn new(mut dir_pin: DIR,
            mut step_pin: STEP,
+           mut enable_pin: ENABLE,
            number_of_steps: u16,
            step_division: u8,
            rpm: f32) -> Result<Self, PINERR> {
         dir_pin.set_high()?;
         step_pin.set_low()?;
+        enable_pin.set_low()?;
 
         Ok(MotorDriver {
             dir_pin,
             step_pin,
+            enable_pin,
             _chip: PhantomData,
             number_of_steps,
             step_division,
@@ -234,14 +249,16 @@ macro_rules! driver {
             const STEP_MIN_TIME: u32 = $time;
         }
 
-        impl<DIR, STEP, PINERR> MotorDriver<DIR, STEP, $name, PINERR>
+        impl<DIR, STEP, ENABLE, PINERR> MotorDriver<DIR, STEP, ENABLE, $name, PINERR>
         where
             DIR: OutputPin<Error = PINERR>,
-            STEP: OutputPin<Error = PINERR>
+            STEP: OutputPin<Error = PINERR>,
+            ENABLE: OutputPin<Error = PINERR>
         {
             /// Specialized constructor
             pub fn $name(dir_pin: DIR,
                          step_pin: STEP,
+                         enable_pin: ENABLE,
                          number_of_steps: u16,
                          mut step_division: u8,
                          rpm: f32) -> Result<Self, PINERR> {
@@ -249,7 +266,7 @@ macro_rules! driver {
                     step_division = 1;
                 }
 
-                Self::new(dir_pin, step_pin, number_of_steps, step_division, rpm)
+                Self::new(dir_pin, step_pin, enable_pin, number_of_steps, step_division, rpm)
             }
         }
     };
@@ -259,3 +276,4 @@ driver!(a4988, 1);
 driver!(drv8825, 2);
 driver!(drv8834, 2);
 driver!(drv8880, 1);
+
